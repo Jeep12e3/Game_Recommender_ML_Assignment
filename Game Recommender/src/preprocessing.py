@@ -9,6 +9,20 @@ import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 
 
+MATURE_CONTENT_TERMS = {
+    "adult content",
+    "sexual content",
+    "nudity",
+    "hentai",
+    "nsfw",
+    "porn",
+    "pornographic",
+    "explicit sexual content",
+    "adult only",
+    "adults only",
+}
+
+
 def _safe_literal(value):
     if pd.isna(value):
         return []
@@ -58,12 +72,83 @@ def parse_owner_midpoint(value) -> float:
     return 0.0
 
 
-def prepare_games(df: pd.DataFrame) -> pd.DataFrame:
+def is_mature_content(row: pd.Series) -> bool:
+    text_parts = [
+        row.get("name", ""),
+        row.get("short_description", ""),
+        row.get("genres", ""),
+        row.get("categories", ""),
+        row.get("tags", ""),
+    ]
+    parsed_parts = []
+    parsed_parts.extend(parse_list_text(row.get("genres", "")))
+    parsed_parts.extend(parse_list_text(row.get("categories", "")))
+    parsed_parts.extend(parse_tags(row.get("tags", ""), limit=50))
+    text_parts.extend(parsed_parts)
+    combined = " ".join(str(part).lower() for part in text_parts if str(part).strip())
+    return any(term in combined for term in MATURE_CONTENT_TERMS)
+
+
+def count_mature_content_games(df: pd.DataFrame) -> int:
+    if df.empty:
+        return 0
+    deduped = df.drop_duplicates(subset=["appid"]).drop_duplicates(subset=["name"])
+    return int(deduped.apply(is_mature_content, axis=1).sum())
+
+
+def default_preprocessing_options(df: pd.DataFrame | None = None) -> dict:
+    year_range = None
+    if df is not None and not df.empty and "release_date" in df:
+        years = pd.to_datetime(df["release_date"], errors="coerce").dt.year.dropna()
+        if not years.empty:
+            year_range = (int(years.min()), int(years.max()))
+
+    return {
+        "remove_duplicates": True,
+        "missing_descriptions": "Keep as empty",
+        "min_reviews": 0,
+        "min_rating": 0,
+        "year_range": year_range,
+        "platforms": ("windows", "mac", "linux"),
+        "price_type": "All",
+        "tag_limit": 20,
+    }
+
+
+def normalize_preprocessing_options(options: dict | None, df: pd.DataFrame | None = None) -> dict:
+    normalized = default_preprocessing_options(df)
+    if options:
+        normalized.update(options)
+
+    if isinstance(normalized.get("platforms"), list):
+        normalized["platforms"] = tuple(normalized["platforms"])
+    if normalized.get("year_range") is not None:
+        normalized["year_range"] = tuple(normalized["year_range"])
+    return normalized
+
+
+def preprocessing_options_key(options: dict | None, df: pd.DataFrame | None = None) -> tuple:
+    normalized = normalize_preprocessing_options(options, df)
+    return tuple(sorted(normalized.items()))
+
+
+def prepare_games(
+    df: pd.DataFrame,
+    remove_duplicates: bool = True,
+    missing_descriptions: str = "Keep as empty",
+    min_reviews: int = 0,
+    min_rating: int = 0,
+    year_range: tuple[int, int] | None = None,
+    platforms: tuple[str, ...] = ("windows", "mac", "linux"),
+    price_type: str = "All",
+    tag_limit: int = 20,
+) -> pd.DataFrame:
     if df.empty:
         return df
 
     prepared = df.copy()
-    prepared = prepared.drop_duplicates(subset=["appid"]).drop_duplicates(subset=["name"])
+    if remove_duplicates:
+        prepared = prepared.drop_duplicates(subset=["appid"]).drop_duplicates(subset=["name"])
 
     prepared["release_date"] = pd.to_datetime(prepared["release_date"], errors="coerce")
     prepared["release_year"] = prepared["release_date"].dt.year.fillna(0).astype(int)
@@ -89,9 +174,31 @@ def prepare_games(df: pd.DataFrame) -> pd.DataFrame:
 
     prepared["genres_list"] = prepared.get("genres", "").apply(parse_list_text)
     prepared["categories_list"] = prepared.get("categories", "").apply(parse_list_text)
-    prepared["tags_list"] = prepared.get("tags", "").apply(parse_tags)
+    prepared["tags_list"] = prepared.get("tags", "").apply(lambda value: parse_tags(value, limit=tag_limit))
     prepared["developers_list"] = prepared.get("developers", "").apply(parse_list_text)
     prepared["publishers_list"] = prepared.get("publishers", "").apply(parse_list_text)
+
+    mature_mask = prepared.apply(is_mature_content, axis=1)
+    prepared = prepared.loc[~mature_mask].copy()
+
+    if missing_descriptions == "Remove missing descriptions":
+        prepared = prepared[prepared["short_description"].fillna("").str.strip().ne("")]
+
+    if year_range is not None:
+        prepared = prepared[prepared["release_year"].between(year_range[0], year_range[1])]
+
+    valid_platforms = [platform for platform in platforms if platform in {"windows", "mac", "linux"}]
+    if valid_platforms:
+        platform_mask = prepared[valid_platforms].astype(bool).any(axis=1)
+        prepared = prepared[platform_mask]
+
+    if price_type == "Free only":
+        prepared = prepared[prepared["is_free"]]
+    elif price_type == "Paid only":
+        prepared = prepared[~prepared["is_free"]]
+
+    prepared = prepared[prepared["total_reviews"].ge(min_reviews)]
+    prepared = prepared[prepared["rating_percent"].ge(min_rating)]
 
     prepared["genres_text"] = prepared["genres_list"].apply(_join)
     prepared["categories_text"] = prepared["categories_list"].apply(_join)
@@ -101,8 +208,12 @@ def prepare_games(df: pd.DataFrame) -> pd.DataFrame:
     prepared["short_description"] = prepared.get("short_description", "").fillna("")
 
     scale_columns = ["rating_percent", "total_reviews", "owner_midpoint", "peak_ccu", "release_year"]
-    scaler = MinMaxScaler()
-    prepared[[f"{col}_scaled" for col in scale_columns]] = scaler.fit_transform(prepared[scale_columns])
+    if prepared.empty:
+        for col in scale_columns:
+            prepared[f"{col}_scaled"] = []
+    else:
+        scaler = MinMaxScaler()
+        prepared[[f"{col}_scaled" for col in scale_columns]] = scaler.fit_transform(prepared[scale_columns])
 
     return prepared.reset_index(drop=True)
 

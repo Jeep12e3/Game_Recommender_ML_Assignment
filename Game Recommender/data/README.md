@@ -16,3 +16,10 @@ If the zip is used, the app reads `games_march2025_cleaned.csv` from inside the 
 
 Large CSV/ZIP files are ignored by Git so the repository stays small enough for GitHub.
 
+The app may create a local processed cache such as:
+
+```text
+data/processed_games_v2.parquet
+```
+
+This cache is also ignored by Git.

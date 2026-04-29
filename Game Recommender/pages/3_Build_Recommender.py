@@ -1,8 +1,7 @@
 import streamlit as st
 
 from src.config import DEFAULT_FEATURES, DEFAULT_WEIGHTS
-from src.data_loader import load_games
-from src.preprocessing import prepare_games
+from src.data_loader import active_preprocessing_key, load_prepared_games
 from src.recommender import build_vector_model, normalize_weights
 from src.ui import page_setup, require_data
 
@@ -10,10 +9,10 @@ from src.ui import page_setup, require_data
 page_setup("Build Recommender")
 st.title("Build Recommender")
 
-raw_df = load_games()
-if not require_data(raw_df):
+df = load_prepared_games()
+if not require_data(df):
     st.stop()
-df = prepare_games(raw_df)
+data_key = active_preprocessing_key()
 
 st.write(
     "Choose which game information should influence similarity, then set how much the final "
@@ -53,7 +52,7 @@ if st.button("Build / Update Recommender", type="primary"):
     st.session_state["selected_features"] = selected_features
     st.session_state["score_weights"] = normalized
     feature_key = tuple(sorted(selected_features.items()))
-    build_vector_model(df, feature_key)
+    build_vector_model(df, feature_key, data_key)
     st.success("Recommender is ready. Go to the Game Recommender page to test it.")
 
 st.subheader("How The Match Score Works")
@@ -70,4 +69,3 @@ st.info(
     "The app does not build a huge 90k x 90k similarity matrix. It vectorizes the games and calculates "
     "similarity only when recommendations are requested, which is lighter for Streamlit."
 )
-

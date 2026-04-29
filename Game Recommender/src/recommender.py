@@ -17,7 +17,7 @@ def normalize_weights(weights: dict[str, float]) -> dict[str, float]:
 
 
 @st.cache_resource(show_spinner="Building TF-IDF recommender...")
-def build_vector_model(_df: pd.DataFrame, selected_features_key: tuple[tuple[str, bool], ...]):
+def build_vector_model(_df: pd.DataFrame, selected_features_key: tuple[tuple[str, bool], ...], data_key: tuple = ()):
     selected_features = dict(selected_features_key)
     feature_text = _df.apply(lambda row: build_feature_text(row, selected_features), axis=1)
     vectorizer = TfidfVectorizer(
@@ -74,8 +74,22 @@ def recommend_games(
     return candidate_scores.sort_values("match_score", ascending=False).head(top_n)
 
 
+def _as_token_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, np.ndarray):
+        return [str(item) for item in value.tolist() if str(item).strip()]
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip()]
+    if isinstance(value, tuple):
+        return [str(item) for item in value if str(item).strip()]
+    if pd.isna(value):
+        return []
+    return [str(value)] if str(value).strip() else []
+
+
 def shared_reasons(source: pd.Series, target: pd.Series, limit: int = 5) -> str:
-    source_tokens = set(source.get("genres_list", []) + source.get("tags_list", []))
-    target_tokens = set(target.get("genres_list", []) + target.get("tags_list", []))
-    shared = list(source_tokens.intersection(target_tokens))
+    source_tokens = set(_as_token_list(source.get("genres_list")) + _as_token_list(source.get("tags_list")))
+    target_tokens = set(_as_token_list(target.get("genres_list")) + _as_token_list(target.get("tags_list")))
+    shared = sorted(source_tokens.intersection(target_tokens))
     return ", ".join(shared[:limit]) if shared else "Similar description and metadata"

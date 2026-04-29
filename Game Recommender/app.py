@@ -1,8 +1,7 @@
 import streamlit as st
 
-from src.data_loader import data_help_message, load_games
-from src.preprocessing import prepare_games
-from src.ui import metric_row, page_setup
+from src.data_loader import data_help_message, load_prepared_games
+from src.ui import metric_row, page_setup, preview_dataframe
 
 
 page_setup("Home")
@@ -13,14 +12,12 @@ st.write(
     "categories, descriptions, and optional popularity/rating signals."
 )
 
-raw_df = load_games()
+df = load_prepared_games()
 
-if raw_df.empty:
+if df.empty:
     st.warning("Dataset not found.")
     st.info(data_help_message())
     st.stop()
-
-df = prepare_games(raw_df)
 
 metric_row(
     [
@@ -55,19 +52,17 @@ with right:
     )
 
 st.subheader("Dataset Preview")
-st.dataframe(
-    df[
-        [
-            "appid",
-            "name",
-            "release_date",
-            "price",
-            "genres",
-            "tags",
-            "rating_percent",
-            "total_reviews",
-        ]
-    ].head(20),
-    use_container_width=True,
+preview_dataframe(
+    df,
+    columns=[
+        "appid",
+        "name",
+        "release_date",
+        "price",
+        "genres",
+        "tags",
+        "rating_percent",
+        "total_reviews",
+    ],
+    key="home_preview_rows",
 )
-

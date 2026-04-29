@@ -9,6 +9,7 @@ env/
 # Large local datasets
 data/*.csv
 data/*.zip
+data/*.parquet
 data/local_data_path.txt
 !data/README.md
 !data/.gitkeep

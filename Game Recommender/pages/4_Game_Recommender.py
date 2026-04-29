@@ -1,8 +1,8 @@
 import streamlit as st
 
 from src.config import DEFAULT_FEATURES, DEFAULT_WEIGHTS
-from src.data_loader import load_games
-from src.preprocessing import apply_filters, prepare_games
+from src.data_loader import active_preprocessing_key, load_prepared_games
+from src.preprocessing import apply_filters
 from src.recommender import build_vector_model, recommend_games
 from src.ui import game_card, page_setup, require_data
 
@@ -10,15 +10,15 @@ from src.ui import game_card, page_setup, require_data
 page_setup("Game Recommender")
 st.title("Game Recommender")
 
-raw_df = load_games()
-if not require_data(raw_df):
+df = load_prepared_games()
+if not require_data(df):
     st.stop()
-df = prepare_games(raw_df)
+data_key = active_preprocessing_key()
 
 selected_features = st.session_state.get("selected_features", DEFAULT_FEATURES)
 score_weights = st.session_state.get("score_weights", DEFAULT_WEIGHTS)
 feature_key = tuple(sorted(selected_features.items()))
-_, matrix = build_vector_model(df, feature_key)
+_, matrix = build_vector_model(df, feature_key, data_key)
 
 st.sidebar.header("Recommendation Filters")
 all_genres = sorted({genre for genres in df["genres_list"] for genre in genres})
@@ -72,4 +72,3 @@ if st.button("Recommend Games", type="primary"):
     st.subheader(f"Because you liked {game_name}")
     for _, row in recommendations.iterrows():
         game_card(row)
-
