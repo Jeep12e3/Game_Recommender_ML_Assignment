@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.env
+.streamlit/secrets.toml
+
+# Large local datasets
+data/*.csv
+data/*.zip
+data/local_data_path.txt
+!data/README.md
+!data/.gitkeep
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
