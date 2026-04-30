@@ -91,7 +91,8 @@ The app:
 2. Combines selected metadata fields into a text feature.
 3. Converts game text into TF-IDF vectors.
 4. Computes cosine similarity for the selected game.
-5. Blends content similarity with normalized numeric signals:
+5. Adds genre/tag/category overlap so recommendations stay closer to the selected game's actual taste profile.
+6. Blends content similarity with normalized numeric signals:
    - rating score
    - popularity score
    - recency score
@@ -106,9 +107,14 @@ match_score =
   + recency_score      * recency_weight
 ```
 
+Popularity is dampened so very famous but unrelated games do not overpower closer niche matches. Recommendation cards also show shared reasons and a compact score breakdown.
+
+Processed parquet caches are paired with metadata files so stale caches are rebuilt when the source data or preprocessing settings change.
+
 ## Notes For Collaborators
 
 - Do not commit the dataset CSV/ZIP files.
 - Keep new shared logic inside `src/`.
 - Keep Streamlit page-specific UI inside `app.py` or `pages/`.
 - If recommendation performance becomes slow, reduce `max_features` in `src/recommender.py`.
+- Run checks with `pytest -q`.

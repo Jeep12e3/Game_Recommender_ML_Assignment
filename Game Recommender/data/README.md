@@ -22,4 +22,6 @@ The app may create a local processed cache such as:
 data/processed_games_v2.parquet
 ```
 
-This cache is also ignored by Git.
+The app may also create matching `.meta.json` files to validate that caches still match the current source data and preprocessing settings.
+
+These cache files are also ignored by Git.

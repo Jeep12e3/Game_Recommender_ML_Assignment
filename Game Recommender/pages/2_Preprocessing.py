@@ -5,12 +5,12 @@ from src.config import PROCESSED_PARQUET
 from src.data_loader import (
     clear_prepared_cache,
     data_help_message,
+    load_base_clean_games,
     load_games,
     load_prepared_games,
     save_active_preprocessing_options,
 )
 from src.preprocessing import (
-    count_mature_content_games,
     default_preprocessing_options,
     normalize_preprocessing_options,
 )
@@ -121,8 +121,9 @@ if apply_clicked:
     st.success("Preprocessing options applied. Build/Recommender pages will use this processed dataset.")
     st.rerun()
 
+base_df = load_base_clean_games()
 df = load_prepared_games()
-mature_removed = count_mature_content_games(raw_df)
+mature_removed = len(raw_df) - len(base_df)
 duplicates_removed = len(raw_df) - len(raw_df.drop_duplicates(subset=["appid"]).drop_duplicates(subset=["name"]))
 total_removed = len(raw_df) - len(df)
 
@@ -143,12 +144,12 @@ st.subheader("Preprocessing Steps")
 st.markdown(
     """
     - Removed adult/sexual-content games by default.
-    - Applied the user-selected duplicate, missing-description, review, rating, year, platform, and price filters.
     - Converted `release_date` into `release_year`.
     - Created `is_free` from the price column.
     - Parsed `genres`, `categories`, `developers`, `publishers`, and weighted Steam `tags`.
     - Created `total_reviews` and `rating_percent`.
     - Converted estimated owner ranges into numeric midpoint values.
+    - Applied the user-selected duplicate, missing-description, review, rating, year, platform, price, and tag-limit options.
     - Applied `MinMaxScaler` to numeric fields used in the recommendation score.
     """
 )

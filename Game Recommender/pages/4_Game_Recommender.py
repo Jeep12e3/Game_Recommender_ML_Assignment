@@ -3,7 +3,7 @@ import streamlit as st
 from src.config import DEFAULT_FEATURES, DEFAULT_WEIGHTS
 from src.data_loader import active_preprocessing_key, load_prepared_games
 from src.preprocessing import apply_filters
-from src.recommender import build_vector_model, recommend_games
+from src.recommender import build_vector_model, normalize_weights, recommend_games
 from src.ui import game_card, page_setup, require_data
 
 
@@ -16,9 +16,21 @@ if not require_data(df):
 data_key = active_preprocessing_key()
 
 selected_features = st.session_state.get("selected_features", DEFAULT_FEATURES)
-score_weights = st.session_state.get("score_weights", DEFAULT_WEIGHTS)
+score_weights = normalize_weights(st.session_state.get("score_weights", DEFAULT_WEIGHTS))
 feature_key = tuple(sorted(selected_features.items()))
 _, matrix = build_vector_model(df, feature_key, data_key)
+
+enabled_features = [feature.replace("_", " ").title() for feature, enabled in selected_features.items() if enabled]
+with st.expander("Active recommender settings", expanded=False):
+    st.write("Content fields: " + ", ".join(enabled_features))
+    st.write(
+        "Weights: "
+        f"content {score_weights['content']:.0%}, "
+        f"rating {score_weights['rating']:.0%}, "
+        f"popularity {score_weights['popularity']:.0%}, "
+        f"recency {score_weights['recency']:.0%}."
+    )
+    st.caption("Change these on the Build Recommender page.")
 
 st.sidebar.header("Recommendation Filters")
 all_genres = sorted({genre for genres in df["genres_list"] for genre in genres})
@@ -42,7 +54,11 @@ candidate_df = apply_filters(
     min_reviews=min_reviews,
 )
 
-st.write(f"Candidate games after filters: **{len(candidate_df):,}**")
+if candidate_df.empty:
+    st.warning("The current filters remove every candidate game. Relax the filters to continue.")
+    st.stop()
+
+st.caption(f"{len(candidate_df):,} candidate games match the current filters.")
 
 game_name = st.selectbox(
     "Choose a game you like",
@@ -55,7 +71,11 @@ if not game_name:
     st.info("Select a game to generate recommendations.")
     st.stop()
 
-if st.button("Recommend Games", type="primary"):
+selected_row = df[df["name"].eq(game_name)].iloc[0]
+st.subheader("Selected Game")
+game_card(selected_row)
+
+if st.button("Recommend Games", type="primary", use_container_width=True):
     recommendations = recommend_games(
         df=df,
         candidate_df=candidate_df,

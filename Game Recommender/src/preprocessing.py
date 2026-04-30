@@ -132,24 +132,11 @@ def preprocessing_options_key(options: dict | None, df: pd.DataFrame | None = No
     return tuple(sorted(normalized.items()))
 
 
-def prepare_games(
-    df: pd.DataFrame,
-    remove_duplicates: bool = True,
-    missing_descriptions: str = "Keep as empty",
-    min_reviews: int = 0,
-    min_rating: int = 0,
-    year_range: tuple[int, int] | None = None,
-    platforms: tuple[str, ...] = ("windows", "mac", "linux"),
-    price_type: str = "All",
-    tag_limit: int = 20,
-) -> pd.DataFrame:
+def base_clean_games(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
 
     prepared = df.copy()
-    if remove_duplicates:
-        prepared = prepared.drop_duplicates(subset=["appid"]).drop_duplicates(subset=["name"])
-
     prepared["release_date"] = pd.to_datetime(prepared["release_date"], errors="coerce")
     prepared["release_year"] = prepared["release_date"].dt.year.fillna(0).astype(int)
     prepared["price"] = pd.to_numeric(prepared.get("price", 0), errors="coerce").fillna(0)
@@ -174,12 +161,39 @@ def prepare_games(
 
     prepared["genres_list"] = prepared.get("genres", "").apply(parse_list_text)
     prepared["categories_list"] = prepared.get("categories", "").apply(parse_list_text)
-    prepared["tags_list"] = prepared.get("tags", "").apply(lambda value: parse_tags(value, limit=tag_limit))
+    prepared["tags_list"] = prepared.get("tags", "").apply(lambda value: parse_tags(value, limit=50))
     prepared["developers_list"] = prepared.get("developers", "").apply(parse_list_text)
     prepared["publishers_list"] = prepared.get("publishers", "").apply(parse_list_text)
 
     mature_mask = prepared.apply(is_mature_content, axis=1)
     prepared = prepared.loc[~mature_mask].copy()
+    prepared["short_description"] = prepared.get("short_description", "").fillna("")
+    prepared["genres_text"] = prepared["genres_list"].apply(_join)
+    prepared["categories_text"] = prepared["categories_list"].apply(_join)
+    prepared["developers_text"] = prepared["developers_list"].apply(_join)
+    prepared["publishers_text"] = prepared["publishers_list"].apply(_join)
+
+    return prepared.reset_index(drop=True)
+
+
+def apply_preprocessing_options(
+    base_df: pd.DataFrame,
+    remove_duplicates: bool = True,
+    missing_descriptions: str = "Keep as empty",
+    min_reviews: int = 0,
+    min_rating: int = 0,
+    year_range: tuple[int, int] | None = None,
+    platforms: tuple[str, ...] = ("windows", "mac", "linux"),
+    price_type: str = "All",
+    tag_limit: int = 20,
+) -> pd.DataFrame:
+    if base_df.empty:
+        return base_df
+
+    prepared = base_df.copy()
+
+    if remove_duplicates:
+        prepared = prepared.drop_duplicates(subset=["appid"]).drop_duplicates(subset=["name"])
 
     if missing_descriptions == "Remove missing descriptions":
         prepared = prepared[prepared["short_description"].fillna("").str.strip().ne("")]
@@ -200,12 +214,8 @@ def prepare_games(
     prepared = prepared[prepared["total_reviews"].ge(min_reviews)]
     prepared = prepared[prepared["rating_percent"].ge(min_rating)]
 
-    prepared["genres_text"] = prepared["genres_list"].apply(_join)
-    prepared["categories_text"] = prepared["categories_list"].apply(_join)
+    prepared["tags_list"] = prepared["tags_list"].apply(lambda tags: list(tags)[:tag_limit])
     prepared["tags_text"] = prepared["tags_list"].apply(_join)
-    prepared["developers_text"] = prepared["developers_list"].apply(_join)
-    prepared["publishers_text"] = prepared["publishers_list"].apply(_join)
-    prepared["short_description"] = prepared.get("short_description", "").fillna("")
 
     scale_columns = ["rating_percent", "total_reviews", "owner_midpoint", "peak_ccu", "release_year"]
     if prepared.empty:
@@ -216,6 +226,10 @@ def prepare_games(
         prepared[[f"{col}_scaled" for col in scale_columns]] = scaler.fit_transform(prepared[scale_columns])
 
     return prepared.reset_index(drop=True)
+
+
+def prepare_games(df: pd.DataFrame, **options) -> pd.DataFrame:
+    return apply_preprocessing_options(base_clean_games(df), **options)
 
 
 def build_feature_text(row: pd.Series, selected_features: dict[str, bool]) -> str:

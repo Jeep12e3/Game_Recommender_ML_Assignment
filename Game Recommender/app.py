@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 
 from src.data_loader import data_help_message, load_prepared_games
 from src.ui import metric_row, page_setup, preview_dataframe
@@ -37,7 +37,7 @@ with left:
     st.markdown(
         """
         1. **Dataset & Preprocessing** cleans the Steam dataset and prepares useful fields.
-        2. **EDA / Insights** explores trends, genres, prices, platforms, and reviews.
+        2. **EDA / Insights** explores trends, genres, prices, platforms, reviews, and any selected column.
         3. **Build Recommender** lets users choose recommendation features and weights.
         4. **Game Recommender** returns similar games with match scores and explanations.
         """
@@ -46,12 +46,16 @@ with left:
 with right:
     st.subheader("Recommendation Method")
     st.write(
-        "The app uses TF-IDF to represent game metadata as vectors, then compares games "
-        "with cosine similarity. Numeric signals such as rating, popularity, and recency "
-        "are normalized with MinMaxScaler and blended into the final match score."
+        "The app uses TF-IDF and shared genre/tag/category overlap to compare games. "
+        "Rating, popularity, and recency signals are normalized and blended into the final score, "
+        "with popularity dampened so famous games do not overpower closer matches."
     )
 
-st.subheader("Dataset Preview")
+st.subheader("Prepared Dataset Preview")
+st.caption(
+    "This preview uses the cleaned/prepared dataset that powers recommendations. "
+    "Switch to all columns when you want to inspect the full prepared table."
+)
 preview_dataframe(
     df,
     columns=[
@@ -64,5 +68,5 @@ preview_dataframe(
         "rating_percent",
         "total_reviews",
     ],
-    key="home_preview_rows",
+    key="home_preview",
 )

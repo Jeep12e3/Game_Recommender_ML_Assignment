@@ -10,6 +10,7 @@ env/
 data/*.csv
 data/*.zip
 data/*.parquet
+data/*.meta.json
 data/local_data_path.txt
 !data/README.md
 !data/.gitkeep
