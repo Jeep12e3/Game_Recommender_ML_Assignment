@@ -1,9 +1,9 @@
-﻿import pandas as pd
+import pandas as pd
 import plotly.express as px
 import streamlit as st
 
 from src.data_loader import data_help_message, load_games
-from src.preprocessing import parse_list_text, parse_tags
+from src.preprocessing import count_mature_content_games, parse_list_text, parse_tags
 from src.ui import download_dataframe, metric_row, page_setup, preview_dataframe, require_data
 
 
@@ -16,11 +16,12 @@ LIST_LIKE_COLUMNS = {
 }
 
 
-page_setup("Raw Data & EDA")
-st.title("Raw Data & EDA")
+page_setup("Exploratory Data Analysis")
+st.title("Exploratory Data Analysis")
 st.caption(
-    "This page starts from the raw loaded dataset. The recommender itself uses the cleaned/prepared "
-    "dataset shown on Home and configured on the Preprocessing page."
+    "This page explores the original Steam dataset before preprocessing. The goal is to understand "
+    "data quality, feature completeness, review coverage, and distribution patterns that will affect "
+    "the preprocessing choices and the recommender model."
 )
 
 raw_df = load_games()
@@ -46,8 +47,8 @@ metric_row(
     ]
 )
 
-st.subheader("Raw Data Preview")
-st.caption("Use the column toggle to switch between the readable preview subset and the full raw table.")
+st.subheader("Data Preview")
+st.caption("The full raw table is shown by default. Switch to selected preview columns for a cleaner view.")
 preview_columns = [
     "appid",
     "name",
@@ -59,24 +60,78 @@ preview_columns = [
     "negative",
     "estimated_owners",
 ]
-preview_dataframe(raw_df, columns=preview_columns, key="raw_preview")
+preview_dataframe(raw_df, columns=preview_columns, key="raw_preview", default_all_columns=True)
 download_dataframe(raw_df, "raw_steam_games.csv", "Download full raw data")
 
-st.subheader("Raw Data Quality")
 left, right = st.columns(2)
 with left:
-    missing = raw_df.isna().sum().sort_values(ascending=False).head(15).reset_index()
+    st.subheader("Data Missing Values")
+    missing = raw_df.isna().sum().sort_values(ascending=False).reset_index()
     missing.columns = ["column", "missing_values"]
-    st.dataframe(missing, use_container_width=True)
+    missing["missing_percent"] = missing["missing_values"] / max(len(raw_df), 1) * 100
+    st.dataframe(missing, width="stretch")
 with right:
+    st.subheader("Data Type")
     dtypes = raw_df.dtypes.astype(str).reset_index()
     dtypes.columns = ["column", "data_type"]
-    st.dataframe(dtypes, use_container_width=True)
+    st.dataframe(dtypes, width="stretch")
+
+
+@st.cache_data(show_spinner=False)
+def mature_content_estimate(df: pd.DataFrame) -> int:
+    return count_mature_content_games(df)
+
+
+def blank_or_missing(series: pd.Series) -> pd.Series:
+    stripped = series.fillna("").astype(str).str.strip()
+    return series.isna() | stripped.eq("") | stripped.eq("[]") | stripped.eq("{}")
+
+
+def parsed_count(series: pd.Series, parser) -> pd.Series:
+    return series.apply(lambda value: len(parser(value)))
+
+
+def show_model_readiness(df: pd.DataFrame) -> None:
+    st.subheader("Recommender Feature Readiness")
+    st.caption(
+        "This section highlights how complete the main recommender features are before preprocessing. "
+        "It helps us decide which columns are reliable enough to use for content similarity."
+    )
+
+    readiness_rows = []
+    feature_columns = [
+        ("genres", parse_list_text, "Main content feature"),
+        ("tags", lambda value: parse_tags(value, limit=50), "Main content feature"),
+        ("categories", parse_list_text, "Main content feature"),
+        ("short_description", None, "Main text feature"),
+        ("developers", parse_list_text, "Optional content feature"),
+        ("publishers", parse_list_text, "Optional content feature"),
+    ]
+    for column, parser, role in feature_columns:
+        if column not in df:
+            continue
+        empty_mask = parsed_count(df[column], parser).eq(0) if parser else blank_or_missing(df[column])
+        available = len(df) - int(empty_mask.sum())
+        readiness_rows.append(
+            {
+                "feature": column,
+                "role": role,
+                "available_rows": available,
+                "missing_or_empty": int(empty_mask.sum()),
+                "available_percent": available / max(len(df), 1) * 100,
+            }
+        )
+
+    st.dataframe(pd.DataFrame(readiness_rows), width="stretch")
 
 
 def show_column_explorer(df: pd.DataFrame) -> None:
-    st.subheader("Any Column Explorer")
-    st.caption("Pick any raw column to inspect missingness, sample values, distributions, and top values.")
+    st.subheader("Column Explorer")
+    st.caption(
+        "Pick any raw column to inspect missingness, sample values, distributions, and top values. Numeric columns "
+        "use all valid rows for statistics and charts; text/list columns show samples and top values because plotting "
+        "tens of thousands of categories would be hard to read."
+    )
 
     controls = st.columns([1.6, 1, 1])
     selected_column = controls[0].selectbox("Column", df.columns.tolist(), index=df.columns.get_loc("name") if "name" in df else 0)
@@ -99,7 +154,7 @@ def show_column_explorer(df: pd.DataFrame) -> None:
 
     st.markdown("**Sample Values**")
     sample_values = series.dropna().astype(str).head(12).reset_index(drop=True).to_frame(name=selected_column)
-    st.dataframe(sample_values, use_container_width=True)
+    st.dataframe(sample_values, width="stretch")
 
     if selected_column in LIST_LIKE_COLUMNS:
         parser = parse_tags if selected_column == "tags" else parse_list_text
@@ -108,11 +163,11 @@ def show_column_explorer(df: pd.DataFrame) -> None:
         value_counts = exploded.value_counts().head(top_n).reset_index()
         value_counts.columns = [selected_column, "count"]
         st.markdown("**Parsed Top Values**")
-        st.dataframe(value_counts, use_container_width=True)
+        st.dataframe(value_counts, width="stretch")
         if not value_counts.empty:
             st.plotly_chart(
                 px.bar(value_counts, x="count", y=selected_column, orientation="h", title=f"Top {selected_column}"),
-                use_container_width=True,
+                width="stretch",
             )
         return
 
@@ -127,10 +182,10 @@ def show_column_explorer(df: pd.DataFrame) -> None:
                 "value": [dates.min(), dates.max()],
             }
         )
-        st.dataframe(date_summary, use_container_width=True)
+        st.dataframe(date_summary, width="stretch")
         by_year = dates.dt.year.value_counts().sort_index().reset_index()
         by_year.columns = ["year", "rows"]
-        st.plotly_chart(px.line(by_year, x="year", y="rows", markers=True, title=f"{selected_column} by Year"), use_container_width=True)
+        st.plotly_chart(px.line(by_year, x="year", y="rows", markers=True, title=f"{selected_column} by Year"), width="stretch")
         return
 
     numeric_series = pd.to_numeric(series, errors="coerce")
@@ -140,10 +195,10 @@ def show_column_explorer(df: pd.DataFrame) -> None:
             st.info("This numeric column has no valid values to chart.")
             return
         st.markdown("**Summary Statistics**")
-        st.dataframe(numeric_series.describe().to_frame(name=selected_column), use_container_width=True)
+        st.dataframe(numeric_series.describe().to_frame(name=selected_column), width="stretch")
         chart_df = numeric_series.to_frame(name=selected_column)
-        st.plotly_chart(px.histogram(chart_df, x=selected_column, nbins=bins, title=f"{selected_column} Distribution"), use_container_width=True)
-        st.plotly_chart(px.box(chart_df, x=selected_column, title=f"{selected_column} Spread"), use_container_width=True)
+        st.plotly_chart(px.histogram(chart_df, x=selected_column, nbins=bins, title=f"{selected_column} Distribution"), width="stretch")
+        st.plotly_chart(px.box(chart_df, x=selected_column, title=f"{selected_column} Spread"), width="stretch")
         return
 
     text_series = series.dropna().astype(str).str.strip()
@@ -151,17 +206,29 @@ def show_column_explorer(df: pd.DataFrame) -> None:
     value_counts = text_series.value_counts().head(top_n).reset_index()
     value_counts.columns = [selected_column, "count"]
     st.markdown("**Top Values**")
-    st.dataframe(value_counts, use_container_width=True)
+    st.dataframe(value_counts, width="stretch")
     if not value_counts.empty:
         st.plotly_chart(
             px.bar(value_counts, x="count", y=selected_column, orientation="h", title=f"Top {selected_column} Values"),
-            use_container_width=True,
+            width="stretch",
         )
 
 
-tab_release, tab_genres, tab_reviews, tab_platforms, tab_explorer = st.tabs(
-    ["Release Trends", "Genres & Tags", "Reviews & Popularity", "Platforms & Price", "Any Column Explorer"]
+show_model_readiness(raw_df)
+
+st.subheader("Data Visualization")
+tab_explorer, tab_release, tab_genres, tab_reviews, tab_platforms = st.tabs(
+    [
+        "Column Explorer",
+        "Release Trends",
+        "Genres & Tags",
+        "Reviews & Popularity",
+        "Platforms & Price",
+    ]
 )
+
+with tab_explorer:
+    show_column_explorer(raw_df)
 
 with tab_release:
     release_counts = (
@@ -171,26 +238,40 @@ with tab_release:
         .reset_index(name="games")
     )
     st.plotly_chart(
-        px.line(release_counts, x="release_year", y="games", markers=True, title="Raw Games Released Per Year"),
-        use_container_width=True,
+        px.line(release_counts, x="release_year", y="games", markers=True, title="Data Games Released Per Year"),
+        width="stretch",
     )
 
 with tab_genres:
+    mature_estimate = mature_content_estimate(raw_df)
+    st.metric("Potential Mature Games", f"{mature_estimate:,}")
+
     genre_counts = raw_df["genres"].apply(parse_list_text).explode().dropna().value_counts().head(20).reset_index()
     genre_counts.columns = ["genre", "games"]
     st.plotly_chart(
-        px.bar(genre_counts, x="games", y="genre", orientation="h", title="Top Raw Genres"),
-        use_container_width=True,
+        px.bar(genre_counts, x="games", y="genre", orientation="h", title="Top Data Genres"),
+        width="stretch",
     )
 
     tag_counts = raw_df["tags"].apply(lambda value: parse_tags(value, limit=10)).explode().dropna().value_counts().head(20).reset_index()
     tag_counts.columns = ["tag", "games"]
     st.plotly_chart(
-        px.bar(tag_counts, x="games", y="tag", orientation="h", title="Top Raw Steam Tags"),
-        use_container_width=True,
+        px.bar(tag_counts, x="games", y="tag", orientation="h", title="Top Data Steam Tags"),
+        width="stretch",
     )
 
 with tab_reviews:
+    review_coverage = pd.DataFrame(
+        {
+            "review_status": ["Has reviews", "No reviews"],
+            "games": [int(raw_df["total_reviews_raw"].gt(0).sum()), int(raw_df["total_reviews_raw"].eq(0).sum())],
+        }
+    )
+    st.plotly_chart(
+        px.bar(review_coverage, x="review_status", y="games", title="Games With vs Without Reviews"),
+        width="stretch",
+    )
+
     reviewed = raw_df[raw_df["total_reviews_raw"].gt(0)].copy()
     reviewed["rating_percent_raw"] = (
         pd.to_numeric(reviewed["positive"], errors="coerce").fillna(0)
@@ -198,13 +279,13 @@ with tab_reviews:
         * 100
     )
     st.plotly_chart(
-        px.histogram(reviewed, x="rating_percent_raw", nbins=40, title="Raw Review Score Distribution"),
-        use_container_width=True,
+        px.histogram(reviewed, x="rating_percent_raw", nbins=40, title="Data Review Score Distribution"),
+        width="stretch",
     )
     top_reviewed = raw_df.sort_values("total_reviews_raw", ascending=False).head(15)
     st.plotly_chart(
-        px.bar(top_reviewed, x="total_reviews_raw", y="name", orientation="h", title="Most Reviewed Raw Games"),
-        use_container_width=True,
+        px.bar(top_reviewed, x="total_reviews_raw", y="name", orientation="h", title="Most Reviewed Data Games"),
+        width="stretch",
     )
 
 with tab_platforms:
@@ -214,13 +295,11 @@ with tab_platforms:
         "Linux": int(raw_df["linux"].sum()),
     }
     st.plotly_chart(
-        px.bar(x=list(platform_counts.keys()), y=list(platform_counts.values()), title="Raw Platform Support"),
-        use_container_width=True,
+        px.bar(x=list(platform_counts.keys()), y=list(platform_counts.values()), title="Data Platform Support"),
+        width="stretch",
     )
 
     price_counts = raw_df["price"].eq(0).map({True: "Free", False: "Paid"}).value_counts().reset_index()
     price_counts.columns = ["type", "games"]
-    st.plotly_chart(px.pie(price_counts, names="type", values="games", title="Raw Free vs Paid Games"), use_container_width=True)
+    st.plotly_chart(px.pie(price_counts, names="type", values="games", title="Data Free vs Paid Games"), width="stretch")
 
-with tab_explorer:
-    show_column_explorer(raw_df)

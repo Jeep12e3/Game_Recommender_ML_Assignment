@@ -14,6 +14,8 @@ BASE_CLEAN_META = DATA_DIR / "base_clean_games_v1.meta.json"
 PROCESSED_PARQUET = DATA_DIR / "processed_games_v2.parquet"
 PROCESSED_META = DATA_DIR / "processed_games_v2.meta.json"
 CSV_INSIDE_ZIP = "games_march2025_cleaned.csv"
+BASE_CLEAN_SCHEMA_VERSION = 2
+PROCESSED_SCHEMA_VERSION = 4
 
 DEFAULT_FEATURES = {
     "genres": True,

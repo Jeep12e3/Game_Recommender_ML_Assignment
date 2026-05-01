@@ -123,9 +123,30 @@ if apply_clicked:
 
 base_df = load_base_clean_games()
 df = load_prepared_games()
+active_settings = normalize_preprocessing_options(st.session_state.get("preprocessing_options"), raw_df)
 mature_removed = len(raw_df) - len(base_df)
 duplicates_removed = len(raw_df) - len(raw_df.drop_duplicates(subset=["appid"]).drop_duplicates(subset=["name"]))
 total_removed = len(raw_df) - len(df)
+
+st.subheader("Scaled Numeric Features")
+scaled_columns = [
+    "rating_percent",
+    "rating_percent_scaled",
+    "total_reviews",
+    "total_reviews_scaled",
+    "owner_midpoint",
+    "owner_midpoint_scaled",
+    "peak_ccu",
+    "peak_ccu_scaled",
+    "release_year",
+    "release_year_scaled",
+]
+preview_dataframe(df, columns=scaled_columns, label="Scaled rows to preview", key="scaled_preview_rows")
+
+st.caption(
+    "MinMaxScaler converts each numeric feature into a 0-1 range, so large values like review counts "
+    "do not overpower smaller values like rating percentage."
+)
 
 st.subheader("Current Preprocessing Summary")
 metric_row(
@@ -138,33 +159,8 @@ metric_row(
 )
 
 with st.expander("Active preprocessing settings", expanded=False):
-    st.json(normalize_preprocessing_options(st.session_state.get("preprocessing_options"), raw_df))
-
-st.subheader("Preprocessing Steps")
-st.markdown(
-    """
-    - Removed adult/sexual-content games by default.
-    - Converted `release_date` into `release_year`.
-    - Created `is_free` from the price column.
-    - Parsed `genres`, `categories`, `developers`, `publishers`, and weighted Steam `tags`.
-    - Created `total_reviews` and `rating_percent`.
-    - Converted estimated owner ranges into numeric midpoint values.
-    - Applied the user-selected duplicate, missing-description, review, rating, year, platform, price, and tag-limit options.
-    - Applied `MinMaxScaler` to numeric fields used in the recommendation score.
-    """
-)
-
+    st.json(active_settings)
 st.caption(f"Duplicate rows detected in raw data: {duplicates_removed:,}.")
-
-if PROCESSED_PARQUET.exists():
-    st.info(
-        f"Default processed cache exists: `{PROCESSED_PARQUET.name}`. "
-        "Custom preprocessing choices are cached in memory during the Streamlit session."
-    )
-
-if st.button("Clear Prepared Data Cache"):
-    clear_prepared_cache()
-    st.success("Prepared cache cleared. Reload the page to rebuild it.")
 
 st.subheader("Preprocessed Data Preview")
 preview_columns = [
@@ -182,20 +178,26 @@ preview_columns = [
 preview_dataframe(df, columns=preview_columns, key="preprocessed_preview_rows")
 download_dataframe(df, "preprocessed_steam_games.csv", "Download full preprocessed data")
 
-st.subheader("Scaled Numeric Features")
-scaled_columns = [
-    "rating_percent",
-    "rating_percent_scaled",
-    "total_reviews",
-    "total_reviews_scaled",
-    "owner_midpoint",
-    "owner_midpoint_scaled",
-    "release_year",
-    "release_year_scaled",
-]
-preview_dataframe(df, columns=scaled_columns, label="Scaled rows to preview", key="scaled_preview_rows")
-
-st.caption(
-    "MinMaxScaler converts each numeric feature into a 0-1 range, so large values like review counts "
-    "do not overpower smaller values like rating percentage."
+st.subheader("Preprocessing Steps")
+st.markdown(
+    """
+    - Removed adult/sexual-content games by default.
+    - Converted `release_date` into `release_year`.
+    - Created `is_free` from the price column.
+    - Parsed `genres`, `categories`, `developers`, `publishers`, and weighted Steam `tags`.
+    - Created `total_reviews` and `rating_percent`.
+    - Converted estimated owner ranges into numeric midpoint values.
+    - Applied the user-selected duplicate, missing-description, review, rating, year, platform, price, and tag-limit options.
+    - Applied MinMaxScaler to numeric fields used in the recommendation score.
+    """
 )
+
+if PROCESSED_PARQUET.exists():
+    st.info(
+        f"Default processed cache exists: `{PROCESSED_PARQUET.name}`. "
+        "Custom preprocessing choices are cached in memory during the Streamlit session."
+    )
+
+if st.button("Clear Prepared Data Cache", type="primary"):
+    clear_prepared_cache()
+    st.success("Prepared cache cleared. Reload the page to rebuild it.")

@@ -118,7 +118,7 @@ def default_preprocessing_options(df: pd.DataFrame | None = None) -> dict:
 def normalize_preprocessing_options(options: dict | None, df: pd.DataFrame | None = None) -> dict:
     normalized = default_preprocessing_options(df)
     if options:
-        normalized.update(options)
+        normalized.update({key: value for key, value in options.items() if key in normalized})
 
     if isinstance(normalized.get("platforms"), list):
         normalized["platforms"] = tuple(normalized["platforms"])

@@ -75,7 +75,7 @@ selected_row = df[df["name"].eq(game_name)].iloc[0]
 st.subheader("Selected Game")
 game_card(selected_row)
 
-if st.button("Recommend Games", type="primary", use_container_width=True):
+if st.button("Recommend Games", type="primary", width="stretch"):
     recommendations = recommend_games(
         df=df,
         candidate_df=candidate_df,
