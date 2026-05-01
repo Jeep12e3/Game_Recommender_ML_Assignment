@@ -5,9 +5,11 @@ import zipfile
 from pathlib import Path
 
 import pandas as pd
+import numpy as np
 import streamlit as st
 
 from src.config import (
+    BASE_CLEAN_SCHEMA_VERSION,
     BASE_CLEAN_PARQUET,
     BASE_CLEAN_META,
     CSV_INSIDE_ZIP,
@@ -17,6 +19,7 @@ from src.config import (
     PRIMARY_ZIP,
     PROCESSED_PARQUET,
     PROCESSED_META,
+    PROCESSED_SCHEMA_VERSION,
 )
 from src.preprocessing import (
     apply_preprocessing_options,
@@ -80,6 +83,40 @@ def available_data_source() -> tuple[str, Path | None]:
     return "missing", None
 
 
+BASE_REQUIRED_COLUMNS = {
+    "release_year",
+    "is_free",
+    "total_reviews",
+    "rating_percent",
+}
+
+PROCESSED_REQUIRED_COLUMNS = {
+    "rating_percent_scaled",
+    "total_reviews_scaled",
+    "owner_midpoint_scaled",
+    "peak_ccu_scaled",
+    "release_year_scaled",
+}
+
+
+def _normalize_platform_column(series: pd.Series) -> pd.Series:
+    numeric = pd.to_numeric(series, errors="coerce")
+    if numeric.notna().any():
+        return numeric.fillna(0).astype(int).astype(bool)
+
+    lowered = series.fillna("").astype(str).str.strip().str.lower()
+    truthy = {"true", "1", "yes", "y"}
+    return lowered.isin(truthy)
+
+
+def _normalize_raw_df(df: pd.DataFrame) -> pd.DataFrame:
+    normalized = df.copy()
+    for column in ("windows", "mac", "linux"):
+        if column in normalized.columns:
+            normalized[column] = _normalize_platform_column(normalized[column])
+    return normalized
+
+
 @st.cache_data(show_spinner="Loading Steam dataset...")
 def load_games() -> pd.DataFrame:
     source_type, source_path = available_data_source()
@@ -88,16 +125,15 @@ def load_games() -> pd.DataFrame:
         return pd.DataFrame()
 
     if source_type == "csv":
-        return pd.read_csv(source_path, usecols=lambda col: col in IMPORTANT_COLUMNS)
+        return _normalize_raw_df(pd.read_csv(source_path, usecols=lambda col: col in IMPORTANT_COLUMNS))
 
     with zipfile.ZipFile(source_path) as archive:
         if CSV_INSIDE_ZIP not in archive.namelist():
             raise FileNotFoundError(f"{CSV_INSIDE_ZIP} was not found inside {source_path.name}")
         with archive.open(CSV_INSIDE_ZIP) as file:
-            return pd.read_csv(file, usecols=lambda col: col in IMPORTANT_COLUMNS)
+            return _normalize_raw_df(pd.read_csv(file, usecols=lambda col: col in IMPORTANT_COLUMNS))
 
 
-@st.cache_data(show_spinner="Base-cleaning Steam dataset...")
 def _base_clean_games_cached(_raw_df: pd.DataFrame, data_signature: tuple) -> pd.DataFrame:
     return base_clean_games(_raw_df)
 
@@ -133,6 +169,12 @@ def _jsonable(value):
         return [_jsonable(item) for item in value]
     if isinstance(value, dict):
         return {key: _jsonable(item) for key, item in value.items()}
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
     return value
 
 
@@ -142,14 +184,28 @@ def _cache_matches(path: Path, expected: dict) -> bool:
     return all(meta.get(key) == value for key, value in expected.items())
 
 
+def _cache_has_columns(path: Path, required_columns: set[str]) -> bool:
+    if not path.exists():
+        return False
+    try:
+        cached_df = pd.read_parquet(path, columns=list(required_columns))
+    except (OSError, ValueError, KeyError, FileNotFoundError):
+        return False
+    return required_columns.issubset(cached_df.columns)
+
+
 def load_base_clean_games() -> pd.DataFrame:
     raw_df = load_games()
     if raw_df.empty:
         return raw_df
 
     raw_signature = _data_signature(raw_df)
-    base_meta = {"raw_signature": raw_signature}
-    if BASE_CLEAN_PARQUET.exists() and _cache_matches(BASE_CLEAN_META, base_meta):
+    base_meta = {"raw_signature": raw_signature, "schema_version": BASE_CLEAN_SCHEMA_VERSION}
+    if (
+        BASE_CLEAN_PARQUET.exists()
+        and _cache_matches(BASE_CLEAN_META, base_meta)
+        and _cache_has_columns(BASE_CLEAN_PARQUET, BASE_REQUIRED_COLUMNS)
+    ):
         return pd.read_parquet(BASE_CLEAN_PARQUET)
 
     base_df = _base_clean_games_cached(raw_df, raw_signature)
@@ -162,9 +218,8 @@ def load_base_clean_games() -> pd.DataFrame:
     return base_df
 
 
-@st.cache_data(show_spinner="Applying preprocessing options...")
 def _apply_preprocessing_cached(_base_df: pd.DataFrame, options_key: tuple, data_signature: tuple) -> pd.DataFrame:
-    options = dict(options_key)
+    options = normalize_preprocessing_options(dict(options_key))
     return apply_preprocessing_options(_base_df, **options)
 
 
@@ -183,12 +238,14 @@ def load_prepared_games(options: dict | None = None) -> pd.DataFrame:
     processed_meta = {
         "base_signature": _data_signature(base_df),
         "options_key": options_key,
+        "schema_version": PROCESSED_SCHEMA_VERSION,
     }
 
     if (
         options_key == default_key
         and PROCESSED_PARQUET.exists()
         and _cache_matches(PROCESSED_META, processed_meta)
+        and _cache_has_columns(PROCESSED_PARQUET, PROCESSED_REQUIRED_COLUMNS)
     ):
         return pd.read_parquet(PROCESSED_PARQUET)
 
@@ -223,8 +280,6 @@ def save_processed_download_cache(prepared: pd.DataFrame) -> None:
 
 def clear_prepared_cache() -> None:
     load_games.clear()
-    _base_clean_games_cached.clear()
-    _apply_preprocessing_cached.clear()
     if BASE_CLEAN_PARQUET.exists():
         BASE_CLEAN_PARQUET.unlink()
     if BASE_CLEAN_META.exists():
