@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import base64
-from html import escape
 from pathlib import Path
 
 import pandas as pd
@@ -640,63 +639,55 @@ def download_dataframe(df: pd.DataFrame, file_name: str, label: str):
 
 
 def game_card(row: pd.Series):
-    image = row.get("header_image", "")
-    image_html = (
-        f'<img src="{escape(image)}" alt="{escape(str(row.get("name", "Game cover")))}">'
-        if isinstance(image, str) and image.startswith("http")
-        else ""
-    )
     price = "Free" if bool(row.get("is_free", False)) else f"${row.get('price', 0):.2f}"
-    name = escape(str(row.get("name", "Unknown game")))
+    name = str(row.get("name", "Unknown game"))
     release_year = int(row.get("release_year", 0) or 0)
     rating = float(row.get("rating_percent", 0) or 0)
     reviews = int(row.get("total_reviews", 0) or 0)
-    description = escape(str(row.get("short_description", "")).strip())
+    description = str(row.get("short_description", "")).strip()
     if len(description) > 280:
         description = f"{description[:280]}..."
-
-    match_html = ""
-    if "match_score" in row and pd.notna(row.get("match_score")):
-        match_score = float(row["match_score"])
-        match_html = f"""
-            <p class="game-card__caption">Match Score: {match_score:.0f}%</p>
-            <div class="game-card__progress"><span style="width: {max(0, min(match_score, 100)):.0f}%"></span></div>
-        """
-
-    reasons_html = ""
-    shared_reasons = row.get("shared_reasons")
-    if isinstance(shared_reasons, str) and shared_reasons.strip():
-        reasons_html = f'<p class="game-card__description"><strong>Recommended because:</strong> {escape(shared_reasons)}</p>'
-
-    breakdown_html = ""
-    score_breakdown = row.get("score_breakdown")
-    if isinstance(score_breakdown, str) and score_breakdown.strip():
-        breakdown_html = f'<p class="game-card__caption">Score mix: {escape(score_breakdown)}</p>'
-
-    description_html = f'<p class="game-card__description">{description}</p>' if description else ""
+    image = row.get("header_image", "")
     appid = row.get("appid")
-    steam_html = (
-        f'<a class="game-card__button" href="https://store.steampowered.com/app/{int(appid)}" target="_blank">Open on Steam</a>'
-        if pd.notna(appid)
-        else ""
-    )
 
-    st.markdown(
-        f"""
-        <article class="game-card">
-            <div class="game-card__media">{image_html}</div>
-            <div class="game-card__body">
-                <h3 class="game-card__title">{name}</h3>
-                <p class="game-card__meta">{price} | {release_year} | {rating:.0f}% positive | {reviews:,} reviews</p>
-                {match_html}
-                {reasons_html}
-                {breakdown_html}
-                {description_html}
-                {steam_html}
-            </div>
-        </article>
-        """,
-        unsafe_allow_html=True,
-    )
+    with st.container(border=True):
+        media_col, body_col = st.columns([1, 1.8], gap="large")
 
+        with media_col:
+            if isinstance(image, str) and image.startswith("http"):
+                st.image(image, width="stretch")
+            else:
+                st.markdown(
+                    '<div class="game-card__media" aria-hidden="true"></div>',
+                    unsafe_allow_html=True,
+                )
 
+        with body_col:
+            st.subheader(name)
+            st.caption(
+                f"{price} | {release_year} | {rating:.0f}% positive | {reviews:,} reviews"
+            )
+
+            if "match_score" in row and pd.notna(row.get("match_score")):
+                match_score = float(row["match_score"])
+                st.progress(
+                    max(0.0, min(match_score / 100, 1.0)),
+                    text=f"Match Score: {match_score:.0f}%",
+                )
+
+            shared_reasons = row.get("shared_reasons")
+            if isinstance(shared_reasons, str) and shared_reasons.strip():
+                st.write(f"**Recommended because:** {shared_reasons}")
+
+            score_breakdown = row.get("score_breakdown")
+            if isinstance(score_breakdown, str) and score_breakdown.strip():
+                st.caption(f"Score mix: {score_breakdown}")
+
+            if description:
+                st.write(description)
+
+            if pd.notna(appid):
+                st.link_button(
+                    "Open on Steam",
+                    f"https://store.steampowered.com/app/{int(appid)}",
+                )
